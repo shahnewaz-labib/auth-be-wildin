@@ -57,20 +57,8 @@ func authMiddleware(c *gin.Context) {
 	printAllSessions()
 	sessionId, err := c.Cookie("sessionId")
 
-	// if err != nil || sessions[sessionId] == "" {
-	// 	c.JSON(http.StatusUnauthorized, gin.H{"message": "unauthorized"})
-	// 	c.Abort()
-	// 	return
-	// }
-
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"message": "no sessionId set"})
-		c.Abort()
-		return
-	}
-
-	if sessions[sessionId] == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"message": "sessionId is empty"})
+	if err != nil || sessions[sessionId] == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"message": "unauthorized"})
 		c.Abort()
 		return
 	}
