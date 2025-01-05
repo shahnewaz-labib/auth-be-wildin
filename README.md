@@ -9,6 +9,10 @@ go run main.go
 ## Test the server
 
 ```curl
+curl -X POST http://localhost:9000/register \
+ -H "Content-Type: application/json" \
+ -d '{"username": "username", "password": "password"}'
+
 curl -X POST http://localhost:9000/login \
     -H "Content-Type: application/json" \
     -d '{"username": "username", "password": "password"}' \

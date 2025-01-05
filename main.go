@@ -1,7 +1,8 @@
 package main
 
 import (
-	"log"
+	"auth-be-wildin/auth"
+	"auth-be-wildin/db"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -12,15 +13,29 @@ const (
 	PORT = ":9000"
 )
 
-var sessions = make(map[string]string)
+func init() {
+	db.InitDB()
+}
 
 type LoginRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
 }
 
-func validateCredentials(username string, password string) bool {
-	return true
+func registerHandler(c *gin.Context) {
+	var loginReq LoginRequest
+	if err := c.ShouldBindJSON(&loginReq); err != nil {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "invalid format"})
+		return
+	}
+
+	err := auth.RegisterUser(loginReq.Username, loginReq.Password)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "internal server error"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "user registered successfully"})
 }
 
 func loginHandler(c *gin.Context) {
@@ -30,35 +45,43 @@ func loginHandler(c *gin.Context) {
 		return
 	}
 
-	if !validateCredentials(loginReq.Username, loginReq.Username) {
-		c.JSON(http.StatusUnauthorized, gin.H{"message": "invalid username or password"})
+	isAuthenticated, err := auth.AuthenticateUser(loginReq.Username, loginReq.Password)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "internal server error"})
+		return
+	}
+
+	if !isAuthenticated {
+		c.JSON(http.StatusUnauthorized, gin.H{"message": "invalid credentials"})
 		return
 	}
 
 	sessionId := uuid.New().String()
 
-	sessions[sessionId] = loginReq.Username
+	err = auth.CreateSession(sessionId, loginReq.Username)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "Could not create session"})
+		return
+	}
 
 	// key, value, maxAge, path, domain, secure, httpOnly
 	c.SetCookie("sessionId", sessionId, 3600, "/", "", false, true)
 
 	c.JSON(http.StatusOK, gin.H{"message": "login successful"})
-	printAllSessions()
-}
-
-func printAllSessions() {
-	log.Println("Current sessions:")
-	for sessionID, username := range sessions {
-		log.Printf("SessionID: %s, Username: %s\n", sessionID, username)
-	}
 }
 
 func authMiddleware(c *gin.Context) {
-	printAllSessions()
 	sessionId, err := c.Cookie("sessionId")
 
-	if err != nil || sessions[sessionId] == "" {
+	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"message": "unauthorized"})
+		c.Abort()
+		return
+	}
+
+	_, err = auth.GetSessionUsername(sessionId)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"message": "invalid session"})
 		c.Abort()
 		return
 	}
@@ -69,13 +92,13 @@ func authMiddleware(c *gin.Context) {
 func getLoggedInUser(c *gin.Context) {
 	sessionId, err := c.Cookie("sessionId")
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"message": "you are not logged in"})
+		c.JSON(http.StatusUnauthorized, gin.H{"message": "no user logged in"})
 		return
 	}
 
-	username := sessions[sessionId]
-	if username == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"message": "you are not logged in"})
+	username, err := auth.GetSessionUsername(sessionId)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"message": "invalid session"})
 		return
 	}
 
@@ -85,7 +108,11 @@ func getLoggedInUser(c *gin.Context) {
 func logoutHandler(c *gin.Context) {
 	sessionId, err := c.Cookie("sessionId")
 	if err == nil {
-		delete(sessions, sessionId)
+		err = auth.DeleteSession(sessionId)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"message": "could not delete session"})
+			return
+		}
 	}
 
 	c.SetCookie("sessionId", "", -1, "/", "", false, true)
@@ -102,6 +129,7 @@ func main() {
 
 	r.GET("/ping", pingHandler)
 
+	r.POST("/register", registerHandler)
 	r.POST("/login", loginHandler)
 
 	auth := r.Group("/")
